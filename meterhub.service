@@ -1,0 +1,14 @@
+[Unit]
+Description=MeterHub 1.0
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 -u meterhub.py
+WorkingDirectory=/home/pi/meterhub
+StandardOutput=inherit
+StandardError=inherit
+Restart=no
+User=pi
+
+[Install]
+WantedBy=multi-user.target

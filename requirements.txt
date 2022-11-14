@@ -1,0 +1,4 @@
+bottle
+waitress
+pyserial>=3.0
+requests
