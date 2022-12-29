@@ -2,16 +2,16 @@
 # CRC Decodeing based on http://www.stefan-weigert.de/php_loader/sml.php
 #
 # Testet with (entered PIN):
-# ISKRA  MT175, MT631
+# ISKRA  MT175
 # ITRON  3.HZ
 # EMH    eHZ
 #
-# Martin Steppuhn 21.5.2021
+# 21.05.2021 Martin Steppuhn
 # 24.05.2021 Martin Steppuhn    lifetime added
 # 25.05.2021 Martin Steppuhn    added logging
 # 10.11.2021 Martin Steppuhn    Test mit weiterem MT175
 # 28.11.2021 Martin Steppuhn    neuer Zähler, EMH eHZ
-# 20.10.2022 Martin Steppuhn    neuer Zähler, MT631
+# 29.12.2022 Martin Steppuhn    full obis datatype support
 
 import logging
 import struct
@@ -117,26 +117,20 @@ class Sml:
         crc_frame, = struct.unpack('<H', frame[-2:])
         # print("crc_calc={} crc_frame={}".format(crc_calc, crc_frame))
         if crc_calc == crc_frame:
-            p = self.get_obis(frame, b'\x77\x07\x01\x00\x10\x07\x00\xff', 4, '>l')   # 77 07 01 00 10 07 00 ff
+            p = self.get_obis(frame, b'\x77\x07\x01\x00\x10\x07\x00\xff')   # 77 07 01 00 10 07 00 ff
             if p is None:
-                p = self.get_obis(frame, b'\x77\x07\x01\x00\x0F\x07\x00\xff', 4, '>l')  # alternativ wegen EMH eHZ    77 07 01 00 0F 07 00 ff
-            return {'e_import': self.get_obis(frame, b'\x77\x07\x01\x00\x01\x08\x00\xff', 8, '>q'),   # 77 07 01 00 01 08 00 ff
-                    'e_export': self.get_obis(frame, b'\x77\x07\x01\x00\x02\x08\x00\xff', 8, '>q'),
+                p = self.get_obis(frame, b'\x77\x07\x01\x00\x0F\x07\x00\xff')  # 77 07 01 00 0F 07 00 ff alternativ wegen EMH eHZ
+            return {'e_import': self.get_obis(frame, b'\x77\x07\x01\x00\x01\x08\x00\xff'),
+                    'e_export': self.get_obis(frame, b'\x77\x07\x01\x00\x02\x08\x00\xff'),
                     'p': p}
-
         return None
 
-    def get_obis(self, frame, obis, size, fmt):
-
-        # ToDo decoder muss selbst das Format wählen !!!
-
+    def get_obis(self, frame, obis):
         """
         Parse single OBIS entry
 
         :param frame: bytes
         :param obis: key (bytes)
-        :param size: byte size
-        :param fmt: format for struct.unpack
         :return: value
         """
         try:
@@ -154,21 +148,30 @@ class Sml:
             factor = 10 ** struct.unpack("@b", frame[pos:pos + 1])[0]
 
             pos += 1
-            if frame[pos] == 0x56:  # nur bei EMH eHZ nur 5Byte !!!
-                pos += 1
-                return round(struct.unpack(fmt, b'\x00\x00\x00' + frame[pos: pos + 5])[0] * factor)  # unpack and scale
-            elif frame[pos] == 0x65:  # MT631 4Byte Payload
-                pos += 1
-                return round(struct.unpack(fmt, b'\x00\x00\x00\x00' + frame[pos: pos + 4])[0] * factor)  # unpack and scale
-            elif frame[pos] == 0x53:  # MT631 2Byte Payload bei Leistung
-                pos += 1
-                return round(struct.unpack(fmt, b'\x00\x00' + frame[pos: pos + 2])[0] * factor)  # unpack and scale
+            typ = frame[pos]
+            pos += 1
+            # print("{:02X} | {}".format(typ, " ".join("{:02X}".format(b) for b in frame[pos: pos + 4])))
 
-            else:
-                pos += 1
-                return round(struct.unpack(fmt, frame[pos: pos + size])[0] * factor)  # unpack and scale
+            if typ == 0x52:  # int8
+                return round(struct.unpack(">b", frame[pos: pos+1])[0] * factor)
+            elif typ == 0x53:  # int16
+                return round(struct.unpack(">h", frame[pos: pos+2])[0] * factor)
+            elif typ == 0x55:  # int32
+                return round(struct.unpack(">i", frame[pos: pos+4])[0] * factor)
+            elif typ == 0x59:  # int64
+                return round(struct.unpack(">q", frame[pos: pos+8])[0] * factor)
 
+            elif typ == 0x62:  # uint8
+                return round(struct.unpack(">B", frame[pos: pos+1])[0] * factor)
+            elif typ == 0x63:  # uint16
+                return round(struct.unpack(">H", frame[pos: pos+2])[0] * factor)
+            elif typ == 0x65:  # uint32
+                return round(struct.unpack(">I", frame[pos: pos+4])[0] * factor)
+            elif typ == 0x69:  # uint64
+                return round(struct.unpack(">Q", frame[pos: pos+8])[0] * factor)
 
+            elif typ == 0x56:  # int64 5BYTE, EMH eHZ only 5Byte !!!
+                return round(struct.unpack(">q", b'\x00\x00\x00' + frame[pos: pos+5])[0] * factor)
         except:
             return None
 
@@ -179,10 +182,9 @@ class Sml:
         :param buffer:
         :return:
         """
-
         buffer, frame = self.get_frame(buffer)
 
-        # print("frame", len(frame), sml.format_hex(frame))
+        # print("frame", len(frame), self.format_hex(frame))
 
         if frame:
             dataset = self.decode_frame(frame)
@@ -245,22 +247,3 @@ class Sml:
                 return self.data[key]
         except:
             return default
-
-
-if __name__ == "__main__":
-
-    logging.getLogger('sml').setLevel(logging.DEBUG)  # hide waitress info log
-
-    # run with offline data from file
-    sml = Sml(lifetime=10)
-    # buffer = open('samples/mt175_martin1.bin', 'rb').read()
-    # buffer = open('samples/karsten1.bin', 'rb').read()
-    # buffer = open('samples/mt175_matthias.bin', 'rb').read()
-    # buffer = open('samples/emh-ehz-michael.bin', 'rb').read()
-    # buffer = open('samples/emh-ehz-michael.bin', 'rb').read()
-    buffer = open('samples/mt631_markus.bin', 'rb').read()
-
-    dataset = True
-    while dataset:
-        buffer, dataset = sml.decode(buffer)
-        print(dataset)
