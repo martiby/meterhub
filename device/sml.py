@@ -12,6 +12,7 @@
 # 10.11.2021 Martin Steppuhn    Test mit weiterem MT175
 # 28.11.2021 Martin Steppuhn    neuer Zähler, EMH eHZ
 # 29.12.2022 Martin Steppuhn    full obis datatype support
+# 31.12.2022 Martin Steppuhn    EMH eHZ IW8 get sign from e_import
 
 import logging
 import struct
@@ -120,6 +121,9 @@ class Sml:
             p = self.get_obis(frame, b'\x77\x07\x01\x00\x10\x07\x00\xff')   # 77 07 01 00 10 07 00 ff
             if p is None:
                 p = self.get_obis(frame, b'\x77\x07\x01\x00\x0F\x07\x00\xff')  # 77 07 01 00 0F 07 00 ff alternativ wegen EMH eHZ
+                if(frame.find(b'\x77\x07\x01\x00\x01\x08\x00\xff' + b'\x64\x01\x01\xA2')) > 0:
+                    p = -p
+
             return {'e_import': self.get_obis(frame, b'\x77\x07\x01\x00\x01\x08\x00\xff'),
                     'e_export': self.get_obis(frame, b'\x77\x07\x01\x00\x02\x08\x00\xff'),
                     'p': p}
@@ -138,6 +142,7 @@ class Sml:
             if pos < 0:
                 return None
             pos += len(obis)
+            # print(" ".join("{:02X}".format(b) for b in frame[pos: pos + 11]))
             if frame[pos] == 0x64:  # different status length
                 pos += 4
             elif frame[pos] == 0x65:  # different status length
@@ -150,6 +155,7 @@ class Sml:
             pos += 1
             typ = frame[pos]
             pos += 1
+
             # print("{:02X} | {}".format(typ, " ".join("{:02X}".format(b) for b in frame[pos: pos + 4])))
 
             if typ == 0x52:  # int8
